@@ -11,7 +11,7 @@ const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
-const openai = new OpenAI({
+const deepSeekApi = new OpenAI({
   baseURL: "https://api.deepseek.com",
   apiKey: OPENAI_API_KEY,
 });
@@ -124,7 +124,7 @@ async function getAIResponse(prompt: string): Promise<Array<{
   };
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await deepSeekApi.chat.completions.create({
       ...queryConfig,
       // return JSON if the model supports it:
       ...(OPENAI_API_MODEL === "deepseek-chat"
