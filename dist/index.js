@@ -52,7 +52,8 @@ const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
 const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
-const openai = new openai_1.default({
+const deepSeekApi = new openai_1.default({
+    baseURL: "https://api.deepseek.com",
     apiKey: OPENAI_API_KEY,
 });
 function getPRDetails() {
@@ -146,7 +147,7 @@ function getAIResponse(prompt) {
             presence_penalty: 0,
         };
         try {
-            const response = yield openai.chat.completions.create(Object.assign(Object.assign(Object.assign({}, queryConfig), (OPENAI_API_MODEL === "gpt-4-1106-preview"
+            const response = yield deepSeekApi.chat.completions.create(Object.assign(Object.assign(Object.assign({}, queryConfig), (OPENAI_API_MODEL === "deepseek-chat"
                 ? { response_format: { type: "json_object" } }
                 : {})), { messages: [
                     {
