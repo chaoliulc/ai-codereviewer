@@ -1,20 +1,33 @@
-name: Code Review with OpenAI
+name: Code Review with DeepSeek
 on:
+  # 在自己的 fork 仓库中推送代码时触发
+  push:
+    branches: [ "**" ]
+  # 在自己的 fork 仓库中创建/更新 PR 时触发
   pull_request:
-    types:
-      - opened
-      - synchronize
-permissions: write-all
+    types: [opened, synchronize]
+    branches: [ main ]
+
+# 给自己的 fork 仓库工作流分配必要权限
+permissions:
+  contents: read  # 读取代码
+  pull-requests: write  # 允许向自己的 PR 写评论
+
 jobs:
   code_review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-      - name: Code Review
-        uses: freeedcom/ai-codereviewer@main
+      - name: Checkout 自己的 fork 仓库代码
+        uses: actions/checkout@v4
         with:
+          fetch-depth: 0  # 拉取完整历史，便于比较代码变更
+
+      - name: 执行 AI 代码审查
+        uses: chaoliulc/ai-codereviewer@main  # 保持 Action 引用不变
+        with:
+          # 使用 fork 仓库自动生成的 GITHUB_TOKEN
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 使用你在 fork 仓库中配置的 API 密钥
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "gpt-4-1106-preview"
+          OPENAI_API_MODEL: "deepseek-chat"
           exclude: "yarn.lock,dist/**"
