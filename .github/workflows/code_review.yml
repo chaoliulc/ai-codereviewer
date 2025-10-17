@@ -25,6 +25,7 @@ jobs:
           # 使用 fork 仓库自动生成的 GITHUB_TOKEN
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 使用你在 fork 仓库中配置的 API 密钥
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "deepseek-chat"
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_MODEL: "deepseek-chat"
+          LLM_BASE_URL: "https://api.deepseek.com"
           exclude: "yarn.lock,dist/**"
