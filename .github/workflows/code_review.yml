@@ -1,31 +1,83 @@
-name: Code Review with DeepSeek
+name: Ping AI Reviewer
+
 on:
-  # 在自己的 fork 仓库中创建/更新 PR 时触发
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [ main ]
+    branches: [main, master, develop]
+  workflow_dispatch: # 支持手动触发
 
-# 给自己的 fork 仓库工作流分配必要权限
 permissions:
-  contents: read  # 读取代码
-  pull-requests: write  # 允许向自己的 PR 写评论
+  contents: read       # 读取仓库文件
+  pull-requests: write # 向 PR 添加评论
 
 jobs:
   code_review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout 自己的 fork 仓库代码
+      # 1️⃣ 拉取指定仓库指定分支
+      - name: Checkout ping ai reviewer action
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 拉取完整历史，便于比较代码变更
+          repository: walkerkay/ping-ai-reviewer        # 目标仓库
+          ref: \#PAR-11              # 指定分支
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0                        # 拉取完整历史
 
-      - name: 执行 AI 代码审查
-        uses: chaoliulc/ai-codereviewer@main  # 保持 Action 引用不变
+      # 2️⃣ 安装 Node.js 20
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
         with:
-          # 使用 fork 仓库自动生成的 GITHUB_TOKEN
+          node-version: 20
+
+      # 3️⃣ 安装依赖
+      - name: 安装依赖
+        run: npm ci
+
+
+      # 4️⃣ 构建项目
+      - name: 编译项目
+        run: npm run build
+
+      # 5️⃣  执行 AI 审查
+      - name: 执行 AI 代码审查
+        run: node dist/review-action.js
+        env:
+          # 环境变量配置
+          NODE_ENV: production
+          # GitHub 相关
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 使用你在 fork 仓库中配置的 API 密钥
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_MODEL: "deepseek-chat"
-          LLM_BASE_URL: "https://api.deepseek.com"
-          exclude: "yarn.lock,dist/**"
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_ACCESS_TOKEN: ${{ secrets.GITHUB_ACCESS_TOKEN }}
+          GITHUB_URL: ${{ secrets.GITHUB_URL }}
+
+          # GitLab 兼容
+          GITLAB_ACCESS_TOKEN: ${{ secrets.GITLAB_ACCESS_TOKEN }}
+          GITLAB_URL: ${{ secrets.GITLAB_URL }}
+
+          # 数据库
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+
+          # LLM 配置
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          QWEN_API_KEY: ${{ secrets.QWEN_API_KEY }}
+          ZHIPUAI_API_KEY: ${{ secrets.ZHIPUAI_API_KEY }}
+          OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL }}
+
+          # 通知
+          DINGTALK_ENABLED: ${{ secrets.DINGTALK_ENABLED }}
+          DINGTALK_WEBHOOK_URL: ${{ secrets.DINGTALK_WEBHOOK_URL }}
+          WECOM_ENABLED: ${{ secrets.WECOM_ENABLED }}
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+          FEISHU_ENABLED: ${{ secrets.FEISHU_ENABLED }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+
+          # 审查配置
+          SUPPORTED_EXTENSIONS: ${{ secrets.SUPPORTED_EXTENSIONS }}
+          PUSH_REVIEW_ENABLED: ${{ secrets.PUSH_REVIEW_ENABLED }}
+          REPORT_CRONTAB_EXPRESSION: ${{ secrets.REPORT_CRONTAB_EXPRESSION }}
+
+          # 日志配置
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
