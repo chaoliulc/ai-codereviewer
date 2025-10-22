@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 name: 直接调用 AI 审查 API
 on:
   pull_request:
@@ -17,14 +18,23 @@ on:
 
 jobs:
   call-ai-review-api:
+=======
+name: AI Code Review
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write  # 权限配置正确，无需修改
+
+jobs:
+  review:
+>>>>>>> 336a5cb (refactor: 测试)
     runs-on: ubuntu-latest
-    services:
-      mongodb:
-        image: mongo:7.0  # MongoDB 官方镜像，可指定版本
-        ports:
-          - 27017:27017
-        options: --health-cmd "mongo --eval 'db.adminCommand('ping')'" --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
+<<<<<<< HEAD
       - name: 1. 调用 AI 审查 API
         env:
           # 环境变量配置（同上，略）
@@ -88,3 +98,16 @@ jobs:
             "$API_URL" \
             && echo -e "\n✅ API 调用成功！" \
             || (echo -e "\n❌ API 调用失败" && exit 1)
+=======
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: chaoliulc/ai-review-action@v1.1
+        with:
+          api_url: ${{ secrets.PING_AI_REVIEWER_API_URL }}
+          llm_provider_api_key: ${{ secrets.LLM_PROVIDER_API_KEY }}
+          llm_provider: ${{ secrets.LLM_PROVIDER }}
+          # 关键：添加这行，将 GITHUB_TOKEN 传递给 Action
+          token: ${{ secrets.GITHUB_TOKEN }}
+>>>>>>> 336a5cb (refactor: 测试)
