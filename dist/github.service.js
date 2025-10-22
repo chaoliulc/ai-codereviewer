@@ -1,17 +1,15 @@
 import { readFileSync } from "fs";
-import { Octokit } from "@octokit/rest";
-import parseDiff, { File } from "parse-diff";
+import parseDiff from "parse-diff";
 import minimatch from "minimatch";
-import { EventData,PRDetails } from "./interface";
-
 export class GitHubService {
-    constructor(private octokit: Octokit, private githubEventPath: string) { }
-
-    getEventData(): EventData {
+    constructor(octokit, githubEventPath) {
+        this.octokit = octokit;
+        this.githubEventPath = githubEventPath;
+    }
+    getEventData() {
         return JSON.parse(readFileSync(this.githubEventPath || "", "utf8"));
     }
-
-    async getPRDetails(): Promise<PRDetails> {
+    async getPRDetails() {
         const { repository, number } = this.getEventData();
         const prResponse = await this.octokit.pulls.get({
             owner: repository.owner.login,
@@ -26,13 +24,7 @@ export class GitHubService {
             description: prResponse.data.body ?? "",
         };
     }
-
-    async createReviewComment(
-        owner: string,
-        repo: string,
-        pull_number: number,
-        comments: Array<{ body: string; path: string; line: number }>
-    ): Promise<void> {
+    async createReviewComment(owner, repo, pull_number, comments) {
         await this.octokit.pulls.createReview({
             owner,
             repo,
@@ -41,15 +33,9 @@ export class GitHubService {
             event: "COMMENT",
         });
     }
-
-    async compareCommits(
-        eventData: EventData,
-        owner: string,
-        repo: string,
-    ): Promise<string | null> {
+    async compareCommits(eventData, owner, repo) {
         const newBaseSha = eventData.before;
         const newHeadSha = eventData.after;
-
         const response = await this.octokit.repos.compareCommits({
             headers: {
                 accept: "application/vnd.github.v3.diff",
@@ -59,18 +45,10 @@ export class GitHubService {
             base: newBaseSha,
             head: newHeadSha,
         });
-
         return String(response.data);
     }
-
-    async getFilteredDiff(
-        eventData: EventData,
-        owner: string,
-        repo: string,
-        pullNumber: number,
-        excludePatterns: Array<string>
-    ): Promise<Array<File>> {
-        let diff: string | null;
+    async getFilteredDiff(eventData, owner, repo, pullNumber, excludePatterns) {
+        let diff;
         if (eventData.action === "opened") {
             const response = await this.octokit.pulls.get({
                 owner,
@@ -80,24 +58,21 @@ export class GitHubService {
             });
             // @ts-expect-error - response.data is a string
             diff = response?.data;
-        } else if (eventData.action === "synchronize") {
-            diff = await this.compareCommits(
-                eventData,
-                owner,
-                repo
-            );
-        } else {
+        }
+        else if (eventData.action === "synchronize") {
+            diff = await this.compareCommits(eventData, owner, repo);
+        }
+        else {
             console.log("Unsupported event:", eventData.action);
             diff = null;
         }
         if (diff) {
             const parsedDiff = parseDiff(diff);
             return parsedDiff.filter((file) => {
-                return !excludePatterns.some((pattern) =>
-                    minimatch(file.to ?? "", pattern)
-                );
+                return !excludePatterns.some((pattern) => minimatch(file.to ?? "", pattern));
             });
-        } else {
+        }
+        else {
             return [];
         }
     }
