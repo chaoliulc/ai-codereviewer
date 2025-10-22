@@ -13,6 +13,12 @@ permissions:
 jobs:
   code_review:
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7.0  # MongoDB 官方镜像，可指定版本
+        ports:
+          - 27017:27017
+        options: --health-cmd "mongo --eval 'db.adminCommand('ping')'" --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
       # 1️⃣ 拉取指定仓库指定分支
       - name: Checkout ping ai reviewer action
