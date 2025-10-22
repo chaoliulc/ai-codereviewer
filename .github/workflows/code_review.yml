@@ -3,6 +3,17 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR 编号（如 123）'
+        required: true
+        type: number
+      source_branch:
+        description: '源分支'
+        required: true
+      target_branch:
+        description: '目标分支'
+        required: true
 
 jobs:
   call-ai-review-api:
@@ -10,40 +21,31 @@ jobs:
     steps:
       - name: 1. 调用 AI 审查 API
         env:
+          # 环境变量配置（同上，略）
           LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
-          LLM_PROVIDER_API_KEY: ${{ secrets.LLM_PROVIDER_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-          # 2. 修复 API_URL 表达式（GitHub Actions 不支持 ||，用 coalesce 函数）
-          API_URL: ${{ secrets.PING_AI_REVIEWER_API_URL || 'https://ping-ai-reviewer.vercel.app/review/github/review' }}
-
-          # 3. 从 GitHub 上下文提取参数（保留原生逻辑）
-          REPO: ${{ github.repository_name }}
-          OWNER: ${{ github.repository_owner }}
-          PR_NUMBER: ${{ github.event.pull_request.number || null }}
-          PR_STATE: ${{ github.event.pull_request.state || null }}
-          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || null }}
-          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || null }}
-          COMMIT_SHA: ${{ github.sha }}
-          EVENT_TYPE: ${{ github.event_name }}
-          PROJECT_ID: ${{ github.repository_id }}
-          PROJECT_NAME: ${{ github.repository_name }}
-        # 关键：run 下的脚本必须统一缩进（用 2 或 4 个空格，不能混合）
-        # 且删除重复代码，保留一套正确逻辑
+          # ... 其他变量保持不变
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number || null }}
+          PR_STATE: ${{ github.event.pull_request.state || github.event.inputs.pr_state || null }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || github.event.inputs.source_branch || github.ref_name || null }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.event.inputs.target_branch || github.event.repository.default_branch || null }}
+          # ... 其余变量
         run: |
-          # 1. 给空变量兜底（用 GitHub 事件上下文，比固定值更灵活）
-          # 优先用 event.repository.name（pull_request 事件必存在），兜底为固定值
-          REPO=${REPO:-${{ github.event.repository.name }}}
-          PROJECT_NAME=${PROJECT_NAME:-${{ github.event.repository.name }}}
+          # 1. Shell 变量兜底为 null（无引号，核心！）
+          REPO=${REPO:-null}
+          PROJECT_NAME=${PROJECT_NAME:-null}
+          PR_NUMBER=${PR_NUMBER:-null}
+          PR_STATE=${PR_STATE:-null}
+          SOURCE_BRANCH=${SOURCE_BRANCH:-null}
+          TARGET_BRANCH=${TARGET_BRANCH:-null}
 
-          # 2. jq 组装请求体（确保 \ 在每行末尾，无空格/隐藏字符）
+          # 2. jq 组装请求体（区分类型处理 null）
           REQUEST_BODY=$(jq -n \
             --arg repo "$REPO" \
-            --argjson mrNumber "$PR_NUMBER" \
+            --argjson mrNumber "$PR_NUMBER" \  # 数字/空值：直接用 --argjson 接收 null
             --arg commitSha "$COMMIT_SHA" \
             --arg eventType "$EVENT_TYPE" \
             --arg token "$GITHUB_TOKEN" \
-            --arg mrState "$PR_STATE" \
+            --arg mrState "$PR_STATE" \        # 字符串：后续用 jq 转换 null
             --arg projectId "$PROJECT_ID" \
             --arg projectName "$PROJECT_NAME" \
             --arg owner "$OWNER" \
@@ -52,26 +54,26 @@ jobs:
             --arg llmProvider "$LLM_PROVIDER" \
             --arg llmProviderApiKey "$LLM_PROVIDER_API_KEY" \
             '{
-              "repo": $repo,
-              "mrNumber": $mrNumber,
+              "repo": ($repo == "null" ? null : $repo),  # 字符串转 null
+              "mrNumber": $mrNumber,  # 直接使用 --argjson 接收的 null
               "commitSha": $commitSha,
               "eventType": $eventType,
               "token": $token,
-              "mrState": $mrState,
+              "mrState": ($mrState == "null" ? null : $mrState),  # 字符串转 null
               "projectId": $projectId,
-              "projectName": $projectName,
+              "projectName": ($projectName == "null" ? null : $projectName),  # 字符串转 null
               "owner": $owner,
-              "sourceBranch": $sourceBranch,
-              "targetBranch": $targetBranch,
+              "sourceBranch": ($sourceBranch == "null" ? null : $sourceBranch),  # 字符串转 null
+              "targetBranch": ($targetBranch == "null" ? null : $targetBranch),  # 字符串转 null
               "llmProvider": $llmProvider,
               "llmProviderApiKey": $llmProviderApiKey
             }')
 
-          # 3. 打印脱敏请求体（加双引号避免 JSON 格式错乱）
+          # 3. 打印验证（确认 null 正确）
           echo "请求体（已脱敏）："
           echo "$REQUEST_BODY" | jq '.token = "***" | .llmProviderApiKey = "***"'
 
-          # 4. curl 发送请求
+          # 4. 发送请求（同上，略）
           curl -X POST \
             -H "Content-Type: application/json" \
             -H "User-Agent: Ping-AI-Reviewer-Workflow" \
