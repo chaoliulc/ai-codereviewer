@@ -1,23 +1,19 @@
-name: "AI Code Review Action"
-description: "Perform code reviews and comment on diffs using OpenAI API."
-inputs:
-  GITHUB_TOKEN:
-    description: "GitHub token to interact with the repository."
-    required: true
-  OPENAI_API_KEY:
-    description: "DeepSeek API key for GPT."
-    required: true
-  OPENAI_API_MODEL:
-    description: "DeepSeek API model."
-    required: false
-    default: "deepseek-chat"
-  exclude:
-    description: "Glob patterns to exclude files from the diff analysis"
-    required: false
-    default: ""
-runs:
-  using: "node16"
-  main: "dist/index.js"
+name: "AI Reviewer"
+description: "自动调用 AI Reviewer API"
+author: "Your Name"
 branding:
-  icon: "aperture"
-  color: "green"
+  icon: "bot"
+  color: "blue"
+
+inputs:
+  api_key:
+    description: "AI Reviewer API Key"
+    required: true
+  api_url:
+    description: "API 服务地址"
+    required: false
+    default: "https://ping-ai-reviewer.vercel.app/review/webhook"
+
+runs:
+  using: "node20"
+  main: "dist/review.action.js"
