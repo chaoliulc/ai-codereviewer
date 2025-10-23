@@ -1,25 +1,84 @@
-name: AI Code Review
-
+name: 直接调用 AI 审查 API
 on:
+  # 触发事件：仅 PR 相关事件（与原脚本触发场景一致）
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  # 可选：允许手动触发
   workflow_dispatch:
 
+# 权限配置：确保能获取 GitHub 上下文和 token（最小权限原则）
 permissions:
-  contents: read
-  pull-requests: write  # 权限配置正确，无需修改
+  contents: read  # 读取仓库内容（非必需，仅为规范）
+  pull-requests: read  # 读取 PR 信息（用于提取 PR 上下文）
 
 jobs:
-  review:
-    runs-on: ubuntu-latest
+  call-ai-review-api:
+    runs-on: ubuntu-latest  # 基础镜像（自带 curl 和 jq，无需额外安装）
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - uses: chaoliulc/ai-review-action@v1.1
-        with:
-          api_url: ${{ secrets.PING_AI_REVIEWER_API_URL }}
-          llm_provider_api_key: ${{ secrets.LLM_PROVIDER_API_KEY }}
-          llm_provider: ${{ secrets.LLM_PROVIDER }}
-          # 关键：添加这行，将 GITHUB_TOKEN 传递给 Action
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: 1. 调用 AI 审查 API
+        env:
+          # 1.1 必要密钥（从仓库 Secrets 中获取，需提前配置）
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+          LLM_PROVIDER_API_KEY: ${{ secrets.LLM_PROVIDER_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub 自动注入的 token（无需手动配置）
+          
+          # 1.2 API 地址（可改为 Secrets 方便自定义）
+          API_URL: ${{ secrets.PING_AI_REVIEWER_API_URL || "https://ping-ai-reviewer.vercel.app/review/github/review" }} 
+          
+          # 1.3 从 GitHub 上下文提取的参数（原脚本的 context 核心参数）
+          REPO: ${{ github.repository_name }}  # 纯仓库名（无需 split，GitHub 原生上下文）
+          OWNER: ${{ github.repository_owner }}  # 仓库所有者（如用户名/组织名）
+          PR_NUMBER: ${{ github.event.pull_request.number || 'null' }}  # PR 编号（PR 事件才有）
+          PR_STATE: ${{ github.event.pull_request.state || 'null' }}  # PR 状态（如 open）
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || 'null' }}  # 源分支
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || 'null' }}  # 目标分支
+          COMMIT_SHA: ${{ github.sha }}  # 当前 commit SHA
+          EVENT_TYPE: ${{ github.event_name }}  # 事件类型（如 pull_request）
+          PROJECT_ID: ${{ github.repository_id }}  # 仓库 ID（GitHub 原生）
+          PROJECT_NAME: ${{ github.repository_name }}  # 项目名（与仓库名一致）
+        run: |
+          # 2. 用 jq 组装 API 请求体（对齐原脚本的 body 结构）
+          REQUEST_BODY=$(jq -n \
+            --arg repo "$REPO" \
+            --argjson mrNumber $PR_NUMBER \
+            --arg commitSha "$COMMIT_SHA" \
+            --arg eventType "$EVENT_TYPE" \
+            --arg token "$GITHUB_TOKEN" \
+            --argjson mrState $PR_STATE \
+            --arg projectId "$PROJECT_ID" \
+            --arg projectName "$PROJECT_NAME" \
+            --arg owner "$OWNER" \
+            --argjson sourceBranch $SOURCE_BRANCH \
+            --argjson targetBranch $TARGET_BRANCH \
+            --arg llmProvider "$LLM_PROVIDER" \
+            --arg llmProviderApiKey "$LLM_PROVIDER_API_KEY" \
+            '{
+              "repo": $repo,
+              "mrNumber": $mrNumber,
+              "commitSha": $commitSha,
+              "eventType": $eventType,
+              "token": $token,
+              "mrState": $mrState,
+              "projectId": $projectId,
+              "projectName": $projectName,
+              "owner": $owner,
+              "sourceBranch": $sourceBranch,
+              "targetBranch": $targetBranch,
+              "llmProvider": $llmProvider,
+              "llmProviderApiKey": $llmProviderApiKey
+            }')
+
+          # 3. 打印请求体（脱敏敏感信息，可选，用于调试）
+          echo "请求体（已脱敏）："
+          echo $REQUEST_BODY | jq '.token = "***" | .llmProviderApiKey = "***"'
+
+          # 4. 用 curl 发送 POST 请求（核心步骤）
+          curl -X POST \
+            -H "Authorization: Bearer $API_KEY" \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: Ping-AI-Reviewer-Workflow" \
+            -d "$REQUEST_BODY" \
+            -sS -f \
+            "$API_URL" \
+            && echo -e "\n✅ API 调用成功！" \
+            || (echo -e "\n❌ API 调用失败" && exit 1)
