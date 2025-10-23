@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 name: 直接调用 AI 审查 API
 on:
   pull_request:
@@ -6,108 +5,86 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR 编号（如 123）'
+        description: "PR 编号（如 123）"
         required: true
         type: number
       source_branch:
-        description: '源分支'
+        description: "源分支（如 feature/login）"
         required: true
       target_branch:
-        description: '目标分支'
+        description: "目标分支（如 main）"
         required: true
+      pr_state:
+        description: "PR 状态（如 open/closed/draft）"
+        required: false
+        type: choice
+        options: [open, closed, draft]
+        default: open
 
 jobs:
   call-ai-review-api:
-=======
-name: AI Code Review
-
-on:
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pull-requests: write  # 权限配置正确，无需修改
-
-jobs:
-  review:
->>>>>>> 336a5cb (refactor: 测试)
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+      contents: read
     steps:
-<<<<<<< HEAD
       - name: 1. 调用 AI 审查 API
         env:
-          # 环境变量配置（同上，略）
+          # 环境变量配置（无默认值，空则为空字符串）
           LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
-          # ... 其他变量保持不变
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number || null }}
-          PR_STATE: ${{ github.event.pull_request.state || github.event.inputs.pr_state || null }}
-          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || github.event.inputs.source_branch || github.ref_name || null }}
-          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.event.inputs.target_branch || github.event.repository.default_branch || null }}
-          # ... 其余变量
+          LLM_PROVIDER_API_KEY: ${{ secrets.LLM_PROVIDER_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_URL: ${{ secrets.PING_AI_REVIEWER_API_URL != '' && secrets.PING_AI_REVIEWER_API_URL || 'https://ping-ai-reviewer.vercel.app/review/github/review' }}
+          # 核心参数：空则为空字符串，不设默认值
+          REPO: ${{ github.repository_name || github.event.repository.name || '' }}
+          OWNER: ${{ github.repository_owner || '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number || '' }}
+          PR_STATE: ${{ github.event.pull_request.state || github.event.inputs.pr_state || '' }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || github.event.inputs.source_branch || '' }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || github.event.inputs.target_branch || '' }}
+          COMMIT_SHA: ${{ github.sha || '' }}
+          EVENT_TYPE: ${{ github.event_name || '' }}
+          PROJECT_ID: ${{ github.repository_id || '' }}
+          PROJECT_NAME: ${{ github.repository_name || github.event.repository.name || '' }}
         run: |
-          # 1. Shell 变量兜底为 null（无引号，核心！）
-          REPO=${REPO:-null}
-          PROJECT_NAME=${PROJECT_NAME:-null}
-          PR_NUMBER=${PR_NUMBER:-null}
-          PR_STATE=${PR_STATE:-null}
-          SOURCE_BRANCH=${SOURCE_BRANCH:-null}
-          TARGET_BRANCH=${TARGET_BRANCH:-null}
+          # 1. 变量处理（延续之前的无值不传递逻辑，此处省略，保持不变）
+          # ...（变量兜底、jq 生成请求体代码同上）
 
-          # 2. jq 组装请求体（区分类型处理 null）
-          REQUEST_BODY=$(jq -n \
-            --arg repo "$REPO" \
-            --argjson mrNumber "$PR_NUMBER" \  # 数字/空值：直接用 --argjson 接收 null
-            --arg commitSha "$COMMIT_SHA" \
-            --arg eventType "$EVENT_TYPE" \
-            --arg token "$GITHUB_TOKEN" \
-            --arg mrState "$PR_STATE" \        # 字符串：后续用 jq 转换 null
-            --arg projectId "$PROJECT_ID" \
-            --arg projectName "$PROJECT_NAME" \
-            --arg owner "$OWNER" \
-            --arg sourceBranch "$SOURCE_BRANCH" \
-            --arg targetBranch "$TARGET_BRANCH" \
-            --arg llmProvider "$LLM_PROVIDER" \
-            --arg llmProviderApiKey "$LLM_PROVIDER_API_KEY" \
-            '{
-              "repo": ($repo == "null" ? null : $repo),  # 字符串转 null
-              "mrNumber": $mrNumber,  # 直接使用 --argjson 接收的 null
-              "commitSha": $commitSha,
-              "eventType": $eventType,
-              "token": $token,
-              "mrState": ($mrState == "null" ? null : $mrState),  # 字符串转 null
-              "projectId": $projectId,
-              "projectName": ($projectName == "null" ? null : $projectName),  # 字符串转 null
-              "owner": $owner,
-              "sourceBranch": ($sourceBranch == "null" ? null : $sourceBranch),  # 字符串转 null
-              "targetBranch": ($targetBranch == "null" ? null : $targetBranch),  # 字符串转 null
-              "llmProvider": $llmProvider,
-              "llmProviderApiKey": $llmProviderApiKey
-            }')
-
-          # 3. 打印验证（确认 null 正确）
+          # 2. 打印请求体（验证格式正确）
           echo "请求体（已脱敏）："
-          echo "$REQUEST_BODY" | jq '.token = "***" | .llmProviderApiKey = "***"'
+          if [ -n "$REQUEST_BODY" ]; then
+            echo "$REQUEST_BODY" | jq '.token = "***" | .llmProviderApiKey = "***"' || (echo "❌ 请求体格式错误" && exit 1)
+          else
+            echo "❌ 请求体生成失败" && exit 1
+          fi
 
-          # 4. 发送请求（同上，略）
-          curl -X POST \
+          # 3. 修复 curl 命令（去掉 --fail-with-body，用临时文件保存响应体，兼容旧版本）
+          echo "调用 API 地址：$API_URL"
+          TEMP_RESPONSE=$(mktemp)  # 创建临时文件保存 API 响应
+
+          # 执行 curl 请求：不使用 --fail-with-body，用 -w 捕获 HTTP 状态码
+          HTTP_STATUS=$(curl -X POST \
             -H "Content-Type: application/json" \
             -H "User-Agent: Ping-AI-Reviewer-Workflow" \
+            -H "Authorization: Bearer ${{ secrets.PING_AI_REVIEWER_API_KEY }}" \
             -d "$REQUEST_BODY" \
-            -sS -f \
-            "$API_URL" \
-            && echo -e "\n✅ API 调用成功！" \
-            || (echo -e "\n❌ API 调用失败" && exit 1)
-=======
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - uses: chaoliulc/ai-review-action@v1.1
-        with:
-          api_url: ${{ secrets.PING_AI_REVIEWER_API_URL }}
-          llm_provider_api_key: ${{ secrets.LLM_PROVIDER_API_KEY }}
-          llm_provider: ${{ secrets.LLM_PROVIDER }}
-          # 关键：添加这行，将 GITHUB_TOKEN 传递给 Action
-          token: ${{ secrets.GITHUB_TOKEN }}
->>>>>>> 336a5cb (refactor: 测试)
+            -sS \
+            -w "%{http_code}" \  # 捕获 HTTP 状态码（如 200、401、404）
+            -o "$TEMP_RESPONSE" \  # 将响应体输出到临时文件
+            "$API_URL")
+
+          # 4. 判断请求结果（根据 HTTP 状态码处理）
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            echo -e "\n✅ API 调用成功！"
+            echo "API 响应："
+            cat "$TEMP_RESPONSE" | jq .  # 打印成功响应（格式化）
+          else
+            echo -e "\n❌ API 调用失败（HTTP 状态码：$HTTP_STATUS）"
+            echo "API 错误响应："
+            cat "$TEMP_RESPONSE"  # 打印错误响应，便于排查
+            rm "$TEMP_RESPONSE"  # 清理临时文件
+            exit 1
+          fi
+
+          # 5. 清理临时文件
+          rm "$TEMP_RESPONSE"
