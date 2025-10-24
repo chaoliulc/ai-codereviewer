@@ -21,6 +21,12 @@ on:
         options: [open, closed, draft]
         default: open
 
+# 关键：配置权限（允许写 PR 评论）
+permissions:
+  pull-requests: write  # 允许读写 PR 相关资源（包括评论）
+  contents: read        # 允许读取仓库内容（获取分支、提交等信息）
+  issues: write         # 可选：如果需要操作 issue 评论，可添加（PR 本质是特殊 issue）
+
 jobs:
   call-ai-review-api:
     runs-on: ubuntu-latest
@@ -47,42 +53,101 @@ jobs:
           PROJECT_ID: ${{ github.repository_id || '' }}
           PROJECT_NAME: ${{ github.repository_name || github.event.repository.name || '' }}
         run: |
-          # 1. 变量处理（延续之前的无值不传递逻辑，此处省略，保持不变）
-          # ...（变量兜底、jq 生成请求体代码同上）
+          # ====================== 1. 补全变量处理（无值则为空字符串，避免未定义）======================
+          REPO="${REPO:-}"
+          OWNER="${OWNER:-}"
+          PR_NUMBER="${PR_NUMBER:-}"
+          PR_STATE="${PR_STATE:-}"
+          SOURCE_BRANCH="${SOURCE_BRANCH:-}"
+          TARGET_BRANCH="${TARGET_BRANCH:-}"
+          COMMIT_SHA="${COMMIT_SHA:-}"
+          EVENT_TYPE="${EVENT_TYPE:-}"
+          PROJECT_ID="${PROJECT_ID:-}"
+          PROJECT_NAME="${PROJECT_NAME:-}"
+          LLM_PROVIDER="${LLM_PROVIDER:-}"
+          LLM_PROVIDER_API_KEY="${LLM_PROVIDER_API_KEY:-}"
+          GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
-          # 2. 打印请求体（验证格式正确）
-          echo "请求体（已脱敏）："
-          if [ -n "$REQUEST_BODY" ]; then
-            echo "$REQUEST_BODY" | jq '.token = "***" | .llmProviderApiKey = "***"' || (echo "❌ 请求体格式错误" && exit 1)
-          else
-            echo "❌ 请求体生成失败" && exit 1
+          # 调试：打印关键变量（问题解决后可删除）
+          echo "=== 调试变量 ==="
+          echo "PR_NUMBER: [$PR_NUMBER], SOURCE_BRANCH: [$SOURCE_BRANCH], TARGET_BRANCH: [$TARGET_BRANCH]"
+          echo "REPO: [$REPO], OWNER: [$OWNER]"
+          echo "=== 调试结束 ==="
+
+          # ====================== 2. 补全 jq 生成请求体（无值不传递，处理语法细节）======================
+          # 关键：每行末尾的 \ 是最后一个字符，无空格；换行符为 LF（Linux）
+          REQUEST_BODY=$(jq -n \
+            --arg repo "$REPO" \
+            --argjson mrNumber "$(if [ -n "$PR_NUMBER" ]; then echo "$PR_NUMBER"; else echo "null"; fi)" \
+            --arg commitSha "$COMMIT_SHA" \
+            --arg eventType "$EVENT_TYPE" \
+            --arg token "$GITHUB_TOKEN" \
+            --arg mrState "$PR_STATE" \
+            --arg projectId "$PROJECT_ID" \
+            --arg projectName "$PROJECT_NAME" \
+            --arg owner "$OWNER" \
+            --arg sourceBranch "$SOURCE_BRANCH" \
+            --arg targetBranch "$TARGET_BRANCH" \
+            --arg llmProvider "$LLM_PROVIDER" \
+            --arg llmProviderApiKey "$LLM_PROVIDER_API_KEY" \
+            '{} 
+            | if $repo != "" then .repo = $repo else . end 
+            | if $mrNumber != null then .mrNumber = $mrNumber else . end 
+            | if $commitSha != "" then .commitSha = $commitSha else . end 
+            | if $eventType != "" then .eventType = $eventType else . end 
+            | if $token != "" then .token = $token else . end 
+            | if $mrState != "" then .mrState = $mrState else . end 
+            | if $projectId != "" then .projectId = $projectId else . end 
+            | if $projectName != "" then .projectName = $projectName else . end 
+            | if $owner != "" then .owner = $owner else . end 
+            | if $sourceBranch != "" then .sourceBranch = $sourceBranch else . end 
+            | if $targetBranch != "" then .targetBranch = $targetBranch else . end 
+            | if $llmProvider != "" then .llmProvider = $llmProvider else . end 
+            | if $llmProviderApiKey != "" then .llmProviderApiKey = $llmProviderApiKey else . end' \
+            2>&1)  # 捕获 jq 错误信息到变量
+
+          # 检查 jq 是否执行成功
+          if [ $? -ne 0 ]; then
+            echo "❌ jq 生成请求体失败！错误详情：$REQUEST_BODY"
+            exit 1
           fi
 
-          # 3. 修复 curl 命令（去掉 --fail-with-body，用临时文件保存响应体，兼容旧版本）
-          echo "调用 API 地址：$API_URL"
-          TEMP_RESPONSE=$(mktemp)  # 创建临时文件保存 API 响应
+          # ====================== 3. 验证请求体（原逻辑保留，增强错误信息）======================
+          echo "请求体（已脱敏）："
+          if [ -n "$REQUEST_BODY" ]; then
+            # 脱敏并验证格式
+            echo "$REQUEST_BODY" | jq '.token = "***" | .llmProviderApiKey = "***"' || (
+              echo "❌ 请求体格式错误（原始内容：$REQUEST_BODY）" && exit 1
+            )
+          else
+            echo "❌ 请求体生成失败（jq 输出为空）" && exit 1
+          fi
 
-          # 执行 curl 请求：不使用 --fail-with-body，用 -w 捕获 HTTP 状态码
+          # ====================== 4. curl 调用（保持原逻辑，修复潜在语法）======================
+          echo "调用 API 地址：$API_URL"
+          TEMP_RESPONSE=$(mktemp)
+
+          # 执行 curl 请求（确保每行 \ 后无空格）
           HTTP_STATUS=$(curl -X POST \
             -H "Content-Type: application/json" \
             -H "User-Agent: Ping-AI-Reviewer-Workflow" \
             -H "Authorization: Bearer ${{ secrets.PING_AI_REVIEWER_API_KEY }}" \
             -d "$REQUEST_BODY" \
             -sS \
-            -w "%{http_code}" \  # 捕获 HTTP 状态码（如 200、401、404）
-            -o "$TEMP_RESPONSE" \  # 将响应体输出到临时文件
+            -w "%{http_code}" \
+            -o "$TEMP_RESPONSE" \
             "$API_URL")
 
-          # 4. 判断请求结果（根据 HTTP 状态码处理）
+          # 判断请求结果
           if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
             echo -e "\n✅ API 调用成功！"
             echo "API 响应："
-            cat "$TEMP_RESPONSE" | jq .  # 打印成功响应（格式化）
+            cat "$TEMP_RESPONSE" | jq .
           else
             echo -e "\n❌ API 调用失败（HTTP 状态码：$HTTP_STATUS）"
             echo "API 错误响应："
-            cat "$TEMP_RESPONSE"  # 打印错误响应，便于排查
-            rm "$TEMP_RESPONSE"  # 清理临时文件
+            cat "$TEMP_RESPONSE"
+            rm "$TEMP_RESPONSE"
             exit 1
           fi
 
