@@ -17,6 +17,7 @@ function getConfig() {
 }
 
 async function main() {
+  console.log("test");
   const config = getConfig();
   const githubService = new GitHubService(new Octokit({ auth: config.githubToken }), config.githubEventPath)
   const eventData = githubService.getEventData();
