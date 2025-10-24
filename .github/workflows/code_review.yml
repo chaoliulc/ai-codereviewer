@@ -1,31 +1,82 @@
-name: Code Review with DeepSeek
+name: 直接调用 AI 审查 API
 on:
-  # 在自己的 fork 仓库中创建/更新 PR 时触发
   pull_request:
-    types: [opened, synchronize, reopened]
-    branches: [ main ]
-
-# 给自己的 fork 仓库工作流分配必要权限
-permissions:
-  contents: read  # 读取代码
-  pull-requests: write  # 允许向自己的 PR 写评论
+    types: [opened, reopened, synchronize, ready_for_review]
+  workflow_dispatch:
 
 jobs:
-  code_review:
+  call-ai-review-api:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout 自己的 fork 仓库代码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # 拉取完整历史，便于比较代码变更
-
-      - name: 执行 AI 代码审查
-        uses: chaoliulc/ai-codereviewer@main  # 保持 Action 引用不变
-        with:
-          # 使用 fork 仓库自动生成的 GITHUB_TOKEN
+      - name: 1. 调用 AI 审查 API
+        env:
+          LLM_PROVIDER: ${{ secrets.LLM_PROVIDER }}
+          LLM_PROVIDER_API_KEY: ${{ secrets.LLM_PROVIDER_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 使用你在 fork 仓库中配置的 API 密钥
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_API_MODEL: "deepseek-chat"
-          LLM_BASE_URL: "https://api.deepseek.com"
-          exclude: "yarn.lock,dist/**"
+
+          # 2. 修复 API_URL 表达式（GitHub Actions 不支持 ||，用 coalesce 函数）
+          API_URL: ${{ secrets.PING_AI_REVIEWER_API_URL || 'https://ping-ai-reviewer.vercel.app/review/github/review' }}
+
+          # 3. 从 GitHub 上下文提取参数（保留原生逻辑）
+          REPO: ${{ github.repository_name }}
+          OWNER: ${{ github.repository_owner }}
+          PR_NUMBER: ${{ github.event.pull_request.number || null }}
+          PR_STATE: ${{ github.event.pull_request.state || null }}
+          SOURCE_BRANCH: ${{ github.event.pull_request.head.ref || null }}
+          TARGET_BRANCH: ${{ github.event.pull_request.base.ref || null }}
+          COMMIT_SHA: ${{ github.sha }}
+          EVENT_TYPE: ${{ github.event_name }}
+          PROJECT_ID: ${{ github.repository_id }}
+          PROJECT_NAME: ${{ github.repository_name }}
+        # 关键：run 下的脚本必须统一缩进（用 2 或 4 个空格，不能混合）
+        # 且删除重复代码，保留一套正确逻辑
+        run: |
+          # 1. 给空变量兜底（用 GitHub 事件上下文，比固定值更灵活）
+          # 优先用 event.repository.name（pull_request 事件必存在），兜底为固定值
+          REPO=${REPO:-${{ github.event.repository.name }}}
+          PROJECT_NAME=${PROJECT_NAME:-${{ github.event.repository.name }}}
+
+          # 2. jq 组装请求体（确保 \ 在每行末尾，无空格/隐藏字符）
+          REQUEST_BODY=$(jq -n \
+            --arg repo "$REPO" \
+            --argjson mrNumber "$PR_NUMBER" \
+            --arg commitSha "$COMMIT_SHA" \
+            --arg eventType "$EVENT_TYPE" \
+            --arg token "$GITHUB_TOKEN" \
+            --arg mrState "$PR_STATE" \
+            --arg projectId "$PROJECT_ID" \
+            --arg projectName "$PROJECT_NAME" \
+            --arg owner "$OWNER" \
+            --arg sourceBranch "$SOURCE_BRANCH" \
+            --arg targetBranch "$TARGET_BRANCH" \
+            --arg llmProvider "$LLM_PROVIDER" \
+            --arg llmProviderApiKey "$LLM_PROVIDER_API_KEY" \
+            '{
+              "repo": $repo,
+              "mrNumber": $mrNumber,
+              "commitSha": $commitSha,
+              "eventType": $eventType,
+              "token": $token,
+              "mrState": $mrState,
+              "projectId": $projectId,
+              "projectName": $projectName,
+              "owner": $owner,
+              "sourceBranch": $sourceBranch,
+              "targetBranch": $targetBranch,
+              "llmProvider": $llmProvider,
+              "llmProviderApiKey": $llmProviderApiKey
+            }')
+
+          # 3. 打印脱敏请求体（加双引号避免 JSON 格式错乱）
+          echo "请求体（已脱敏）："
+          echo "$REQUEST_BODY" | jq '.token = "***" | .llmProviderApiKey = "***"'
+
+          # 4. curl 发送请求
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -H "User-Agent: Ping-AI-Reviewer-Workflow" \
+            -d "$REQUEST_BODY" \
+            -sS -f \
+            "$API_URL" \
+            && echo -e "\n✅ API 调用成功！" \
+            || (echo -e "\n❌ API 调用失败" && exit 1)
